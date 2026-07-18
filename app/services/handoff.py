@@ -1,22 +1,17 @@
-import os
 import re
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
 
-load_dotenv()
 
 
+CHAT_MODEL = "gpt-5-mini"
 
 
 client = OpenAI(api_key="")
 
-CHAT_MODEL = "gpt-3.5-turbo"
-
 
 COMMERCIAL_KEYWORDS = (
-    # Harga dan anggaran
     "harga",
     "biaya",
     "budget",
@@ -27,8 +22,6 @@ COMMERCIAL_KEYWORDS = (
     "dana",
     "berapa harganya",
     "berapa biayanya",
-
-    # Penawaran
     "proposal",
     "quotation",
     "penawaran",
@@ -36,8 +29,6 @@ COMMERCIAL_KEYWORDS = (
     "kontrak",
     "purchase order",
     "po proyek",
-
-    # Kerja sama dan proyek
     "kerja sama",
     "kerjasama",
     "kolaborasi",
@@ -52,8 +43,6 @@ COMMERCIAL_KEYWORDS = (
     "vendor",
     "mitra",
     "konsultasi proyek",
-
-    # Permintaan pengerjaan
     "ingin membuat",
     "ingin membangun",
     "ingin mengembangkan",
@@ -68,8 +57,10 @@ COMMERCIAL_KEYWORDS = (
 
 COMMERCIAL_PATTERNS = (
     r"\b(?:rp|idr)\s*[\d.,]+\b",
-    r"\b\d+(?:[.,]\d+)?\s*(?:juta|jt|miliar|milyar)\b",
-    r"\b(?:kami|saya)\s+(?:punya|ada|memiliki)\s+proyek\b",
+    r"\b\d+(?:[.,]\d+)?\s*"
+    r"(?:juta|jt|miliar|milyar)\b",
+    r"\b(?:kami|saya)\s+"
+    r"(?:punya|ada|memiliki)\s+proyek\b",
     r"\b(?:kami|saya)\s+ingin\s+"
     r"(?:membuat|membangun|mengembangkan)\b",
     r"\b(?:kami|saya)\s+membutuhkan\s+"
@@ -92,12 +83,121 @@ def is_commercial_intent(
     )
 
     has_pattern = any(
-        re.search(pattern, normalized)
+        re.search(
+            pattern,
+            normalized,
+        )
         for pattern in COMMERCIAL_PATTERNS
     )
 
-    return has_keyword or has_pattern
+    return (
+        has_keyword
+        or has_pattern
+    )
 
+def normalize_command(
+    message: str,
+) -> str:
+    return " ".join(
+        message.casefold().strip().split()
+    )
+
+
+def is_handoff_request(
+    message: str,
+) -> bool:
+    normalized = normalize_command(message)
+
+    handoff_commands = (
+        "kirim ke marketing",
+        "kirim ke admin",
+        "hubungi marketing",
+        "hubungi tim marketing",
+        "teruskan ke marketing",
+        "teruskan ke admin",
+        "lanjut ke marketing",
+        "lanjutkan ke marketing",
+        "saya ingin dihubungi",
+        "saya mau dihubungi",
+        "buatkan penawaran",
+        "minta penawaran",
+        "ajukan penawaran",
+        "kirim proposal",
+        "minta proposal",
+    )
+
+    return any(
+        command in normalized
+        for command in handoff_commands
+    )
+
+
+def is_positive_confirmation(
+    message: str,
+) -> bool:
+    normalized = normalize_command(message)
+
+    positive_answers = {
+        "ya",
+        "iya",
+        "y",
+        "yes",
+        "boleh",
+        "oke",
+        "ok",
+        "setuju",
+        "lanjut",
+        "lanjutkan",
+        "silakan",
+        "iya boleh",
+        "ya boleh",
+        "iya kirim",
+        "ya kirim",
+        "oke kirim",
+        "ok kirim",
+    }
+
+    return normalized in positive_answers
+
+
+def is_negative_confirmation(
+    message: str,
+) -> bool:
+    normalized = normalize_command(message)
+
+    negative_answers = {
+        "tidak",
+        "nggak",
+        "enggak",
+        "ga",
+        "gak",
+        "no",
+        "belum",
+        "nanti",
+        "tidak dulu",
+        "belum dulu",
+        "lanjut konsultasi",
+    }
+
+    return normalized in negative_answers
+
+
+def is_cancel_command(
+    message: str,
+) -> bool:
+    normalized = normalize_command(message)
+
+    cancel_commands = {
+        "batal",
+        "cancel",
+        "kembali",
+        "batalkan",
+        "batal kirim",
+        "kembali ke chat",
+        "lanjut konsultasi",
+    }
+
+    return normalized in cancel_commands
 
 def summarize_conversation(
     customer_email: str,
@@ -114,46 +214,37 @@ def summarize_conversation(
 
     response = client.chat.completions.create(
         model=CHAT_MODEL,
-        temperature=0,
+        
         messages=[
             {
                 "role": "system",
                 "content": """
-                    Buat ringkasan kebutuhan calon pelanggan
-                    PT PowerNET Indosolution untuk diteruskan kepada
-                    tim marketing.
+                        Buat ringkasan kebutuhan calon pelanggan
+                        PT PowerNET Indosolution untuk diteruskan
+                        kepada tim marketing.
 
-                    Pelanggan dapat:
-                    - menanyakan harga atau biaya;
-                    - memberikan anggaran atau nilai proyek;
-                    - langsung mengajukan proyek;
-                    - meminta pengembangan website, aplikasi, GIS,
-                    sistem informasi, infrastruktur IT, atau layanan lain;
-                    - meminta proposal, quotation, atau penawaran;
-                    - mengajukan kerja sama;
-                    - menyebutkan target waktu.
+                        Gunakan format persis berikut:
 
-                    Gunakan format persis berikut:
+                        Email pelanggan:
+                        Nomor WhatsApp pelanggan:
+                        Jenis kebutuhan:
+                        Layanan atau proyek:
+                        Gambaran kebutuhan:
+                        Permintaan komersial:
+                        Harga atau anggaran yang disebutkan:
+                        Target waktu:
+                        Permintaan khusus:
+                        Tindak lanjut yang disarankan:
 
-                    Email pelanggan:
-                    Nomor WhatsApp pelanggan:
-                    Jenis kebutuhan:
-                    Layanan atau proyek:
-                    Gambaran kebutuhan:
-                    Permintaan komersial:
-                    Harga atau anggaran yang disebutkan:
-                    Target waktu:
-                    Permintaan khusus:
-                    Tindak lanjut yang disarankan:
-
-                    Aturan:
-                    - Jangan mengarang informasi.
-                    - Gunakan hanya informasi dari percakapan.
-                    - Tulis "Belum disebutkan" jika informasi tidak tersedia.
-                    - Pertahankan nominal anggaran secara tepat.
-                    - Bedakan pertanyaan harga dan pengajuan proyek.
-                    - Buat ringkasan singkat, rapi, dan mudah dibaca.
-                    """.strip(),
+                        Aturan:
+                        - Jangan mengarang informasi.
+                        - Gunakan hanya informasi dari percakapan.
+                        - Tulis "Belum disebutkan" jika informasi
+                        tidak tersedia.
+                        - Pertahankan nominal anggaran secara tepat.
+                        - Bedakan pertanyaan harga dan pengajuan proyek.
+                        - Buat ringkasan singkat dan mudah dibaca.
+                                        """.strip(),
             },
             {
                 "role": "user",
@@ -169,7 +260,12 @@ def summarize_conversation(
         ],
     )
 
-    summary = response.choices[0].message.content
+    summary = (
+        response
+        .choices[0]
+        .message
+        .content
+    )
 
     if summary is None or not summary.strip():
         raise RuntimeError(
@@ -184,11 +280,13 @@ def build_customer_handoff_message(
     customer_phone: str,
 ) -> str:
     return (
-        "Terima kasih. Informasi dan ringkasan kebutuhan "
-        "Bapak/Ibu telah diteruskan kepada tim marketing "
+        "Terima kasih. Informasi dan ringkasan "
+        "kebutuhan Bapak/Ibu telah diteruskan "
+        "kepada tim marketing "
         "PT PowerNET Indosolution.\n\n"
         f"Email tindak lanjut: {customer_email}\n"
         f"Nomor WhatsApp: +{customer_phone}\n\n"
-        "Tim kami akan menghubungi Bapak/Ibu untuk "
-        "membahas kebutuhan proyek atau penawaran lebih lanjut."
+        "Tim kami akan menghubungi Bapak/Ibu "
+        "untuk membahas kebutuhan proyek atau "
+        "penawaran lebih lanjut."
     )

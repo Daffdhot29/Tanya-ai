@@ -1,15 +1,12 @@
-import os
+from hashlib import sha256
 from pathlib import Path
 
-from dotenv import load_dotenv
 from openai import OpenAI
 from pymongo import MongoClient
-from pypdf import PdfReader 
+from pypdf import PdfReader
 
 
-load_dotenv()
-
-
+PDF_PATH = Path("docs/PT_PowerNet_Indosolution_Proposal_v2.pdf")
 client = OpenAI(api_key="")
 
 mongo = MongoClient("")
@@ -17,12 +14,9 @@ db = mongo.get_database("PWNETDB")
 collection = db.get_collection("PWNET")
 
 
-PDF_PATH = "docs/PT_PowerNet_Indosolution_Proposal_v2.pdf"
-
-EMBEDDING_MODEL = "text-embedding-3-large"
-
-
-def get_embedding(text: str) -> list[float]:
+def get_embedding(
+    text: str,
+) -> list[float]:
     cleaned_text = text.strip()
 
     if not cleaned_text:
@@ -31,34 +25,43 @@ def get_embedding(text: str) -> list[float]:
         )
 
     response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
+        model="text-embedding-3-large",
         input=cleaned_text,
     )
 
     return response.data[0].embedding
 
 
-def read_pdf() -> str:
-    if not PDF_PATH.exists():
-        raise FileNotFoundError(
-            f"Dokumen tidak ditemukan: {PDF_PATH}"
+def read_pdf_pages() -> list[dict]:
+
+    reader = PdfReader(
+        str(PDF_PATH)
+    )
+
+    pages: list[dict] = []
+
+    for page_number, page in enumerate(
+        reader.pages,
+        start=1,
+    ):
+        page_text = page.extract_text() or ""
+
+        cleaned_text = " ".join(
+            page_text.split()
         )
 
-    reader = PdfReader(str(PDF_PATH))
-    text_parts: list[str] = []
+        if cleaned_text:
+            pages.append({
+                "page_number": page_number,
+                "text": cleaned_text,
+            })
 
-    for page in reader.pages:
-        page_text = page.extract_text()
-
-        if page_text:
-            text_parts.append(page_text)
-
-    return "\n".join(text_parts)
+    return pages
 
 
 def chunk_text(
     text: str,
-    chunk_size: int = 1000,
+    chunk_size: int = 1200,
     overlap: int = 200,
 ) -> list[str]:
     if chunk_size <= 0:
@@ -72,11 +75,13 @@ def chunk_text(
         )
 
     chunks: list[str] = []
+
     start = 0
     step = chunk_size - overlap
 
     while start < len(text):
         end = start + chunk_size
+
         chunk = text[start:end].strip()
 
         if chunk:
@@ -87,37 +92,79 @@ def chunk_text(
     return chunks
 
 
+def make_document_id() -> str:
+    absolute_path = str(
+        PDF_PATH.resolve()
+    )
+
+    return sha256(
+        absolute_path.encode("utf-8")
+    ).hexdigest()
+
+
 def ingest_document() -> None:
-    text = read_pdf()
+    pages = read_pdf_pages()
 
-    print("PDF TEXT LENGTH:", len(text))
-    print("PDF PREVIEW:", text[:500])
-
-    if not text.strip():
+    if not pages:
         raise ValueError(
             "PDF kosong atau tidak dapat dibaca"
         )
 
-    chunks = chunk_text(text)
+    document_id = make_document_id()
+
     documents: list[dict] = []
 
-    for index, chunk in enumerate(chunks):
-        embedding = get_embedding(chunk)
+    global_chunk_index = 0
 
-        documents.append({
-            "source": str(PDF_PATH),
-            "chunk_index": index,
-            "text": chunk,
-            "embedding": embedding,
-            "embedding_model": EMBEDDING_MODEL,
-        })
+    for page in pages:
+        page_number = page["page_number"]
+        page_text = page["text"]
 
-    collection.delete_many({})
-    collection.insert_many(documents)
+        chunks = chunk_text(
+            page_text
+        )
+
+        for page_chunk_index, chunk in enumerate(
+            chunks
+        ):
+            print(
+                "Embedding page",
+                page_number,
+                "chunk",
+                page_chunk_index,
+            )
+
+            embedding = get_embedding(
+                chunk
+            )
+
+            documents.append({
+                "document_id": document_id,
+                "document_name": PDF_PATH.name,
+                "source": str(PDF_PATH),
+                "page_number": page_number,
+                "page_chunk_index": page_chunk_index,
+                "chunk_index": global_chunk_index,
+                "text": chunk,
+                "embedding": embedding,
+                "embedding_model":"text-embedding-3-large",
+            })
+
+            global_chunk_index += 1
+
+    collection.delete_many({
+        "document_id": document_id,
+    })
+
+    if documents:
+        collection.insert_many(
+            documents
+        )
 
     print(
-        f"{len(documents)} chunks inserted to MongoDB"
+        f"{len(documents)} chunks inserted ke MongoDB"
     )
+
     print(
         "Embedding dimension:",
         len(documents[0]["embedding"]),

@@ -1,102 +1,172 @@
-import os
-
-from dotenv import load_dotenv
 from openai import OpenAI
 from pymongo import MongoClient
 
+from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
+from pymongo import MongoClient
 
-load_dotenv()
+OPENAI_API_KEY = ""
 
-client = OpenAI(api_key="")
+MONGODB_URI = ""
 
-mongo = MongoClient("")
-db = mongo.get_database("PWNETDB")
-collection = db.get_collection("PWNET")
+MONGODB_DATABASE = "PWNETDB"
+MONGODB_COLLECTION = "PWNET"
 
+MONGODB_VECTOR_INDEX = "powernet_vector_index"
 
 EMBEDDING_MODEL = "text-embedding-3-large"
-CHAT_MODEL = "gpt-3.5-turbo"
-VECTOR_INDEX_NAME = "RAG_Index"
+CHAT_MODEL = "gpt-5-mini"
+
+
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+)
+
+mongo = MongoClient(
+    MONGODB_URI,
+    serverSelectionTimeoutMS=10_000,
+)
+
+db = mongo.get_database(
+    MONGODB_DATABASE
+)
+
+collection = db.get_collection(
+    MONGODB_COLLECTION
+)
 
 
 SYSTEM_PROMPT = """
-Kamu adalah PowerNET Assistant, Customer Service AI resmi
-PT PowerNET Indosolution.
+    Anda adalah PowerNET Assistant, konsultan digital dan
+    presales assistant resmi PT PowerNet Indosolution.
 
-Tugas utama:
-- Membantu pelanggan dan calon pelanggan secara ramah,
-  profesional, sopan, komunikatif, dan informatif.
-- Gunakan konteks dokumen sebagai sumber utama jawaban.
-- Pertahankan konteks percakapan sebelumnya selama masih
-  berhubungan dengan pertanyaan pengguna.
-- Jangan mengarang informasi yang tidak ada pada konteks.
-- Jangan menyebut istilah internal seperti embedding,
-  vector database, retrieval, RAG, chunk, atau context.
+    Layanan utama PT PowerNet Indosolution:
+    - Drone Ecosystem
+    - IT Security & System
+    - Software & AI
 
-Ketentuan jawaban:
-- Gunakan bahasa Indonesia yang natural dan mudah dipahami.
-- Susun jawaban secara rapi dan tidak berantakan.
-- Awali dengan jawaban inti.
-- Jika menjelaskan layanan atau produk, gunakan susunan:
-  1. Nama atau jenis layanan.
-  2. Fungsi utama.
-  3. Manfaat bagi pelanggan.
-  4. Contoh penerapan jika tersedia.
-- Gunakan paragraf pendek.
-- Hindari pengulangan informasi.
-- Jangan membuat daftar terlalu panjang.
-- Jika informasi tidak ditemukan, sampaikan dengan sopan.
-- Pertanyaan harga, anggaran, proposal, penawaran,
-  kontrak, kerja sama, atau pengajuan proyek ditangani
-  oleh mekanisme handoff dan tidak perlu dijawab di sini.
-- Jika pertanyaan tidak terkait layanan PT PowerNET Indosolution,
-    sampaikan dengan sopan bahwa kamu tidak dapat menjawabnya.
-- Jangan Tawarkan produk yang tidak ditanya dan jangan masukkan informasi yang tidak relevan.
-- Jawab sesuai kebutuhan pelanggan dan jangan menambahkan informasi yang tidak diminta.
-  ATURAN FORMAT JAWABAN:
+    TUJUAN UTAMA
 
-1. Gunakan Markdown yang rapi.
-2. Jangan menulis seluruh jawaban dalam satu paragraf panjang.
-3. Gunakan paragraf pendek, maksimal 2–3 kalimat.
-4. Jika menjelaskan beberapa layanan atau produk:
-   - awali dengan kalimat pengantar singkat;
-   - gunakan heading tebal untuk setiap layanan;
-   - gunakan maksimal 2 bullet point per layanan;
-   - pisahkan setiap layanan dengan satu baris kosong.
-5. Jangan menggunakan penomoran inline seperti:
-   "1. layanan A 2. layanan B 3. layanan C"
-   dalam satu paragraf.
-6. Jangan mengulang informasi yang sama.
-7. Gunakan maksimal 5 kelompok layanan utama.
-8. Akhiri dengan satu kalimat penutup yang menawarkan bantuan lanjutan.
-9. Jangan menggunakan tabel kecuali pengguna meminta perbandingan.
-10. Pertanyaan harga, biaya, anggaran, proposal, quotation,
-    kontrak, penawaran, kerja sama, atau pengajuan proyek
-    ditangani oleh mekanisme handoff sistem.
+    Bangun komunikasi yang ramah, menarik, profesional,
+    dan konsultatif agar calon pelanggan merasa dipahami
+    sebelum diberikan rancangan teknis.
 
-FORMAT UNTUK PERTANYAAN DAFTAR LAYANAN:
+    Jangan langsung memberikan jawaban teknis yang terlalu
+    panjang ketika kebutuhan pengguna masih umum.
 
-Berikut layanan utama yang tersedia:
+    ALUR KOMUNIKASI
 
-**Nama layanan**
-- Fungsi utama.
-- Manfaat atau contoh penerapan.
+    Ketika pengguna menyampaikan ide atau kebutuhan proyek:
 
-**Nama layanan**
-- Fungsi utama.
-- Manfaat atau contoh penerapan.
+    1. Berikan respons positif terhadap ide pengguna.
+    2. Tunjukkan bahwa Anda memahami gambaran awal kebutuhannya.
+    3. Jelaskan secara singkat potensi manfaat solusi tersebut.
+    4. Ajukan satu pertanyaan lanjutan yang paling penting.
+    5. Tunggu jawaban pengguna sebelum menggali kebutuhan berikutnya.
+    6. Berikan rancangan lengkap hanya jika informasi sudah cukup
+    atau pengguna secara eksplisit meminta rancangan.
 
-Tutup dengan kalimat:
-"Silakan sebutkan layanan yang ingin diketahui lebih lanjut."
-""".strip()
+    CONTOH
 
+    Pengguna:
+    Saya ingin membangun website untuk warkop123.
 
-def get_embedding(text: str) -> list[float]:
+    Respons yang diharapkan:
+    Tentu, website untuk Warkop123 bisa menjadi langkah yang bagus
+    untuk memperkuat identitas bisnis dan membantu pelanggan melihat
+    menu, lokasi, promo, serta melakukan pemesanan dengan lebih mudah.
+
+    Supaya rancangan awalnya sesuai, apakah website tersebut lebih
+    difokuskan sebagai company profile dan katalog menu, atau juga
+    ingin menyediakan pemesanan online?
+
+    Jangan langsung menjelaskan seluruh fitur, teknologi, hosting,
+    database, dan arsitektur sebelum mengetahui kebutuhan pengguna.
+
+    GAYA KOMUNIKASI
+
+    - Ramah dan komunikatif.
+    - Profesional tetapi tidak terlalu formal.
+    - Tidak terdengar seperti robot.
+    - Fokus pada kebutuhan dan manfaat bagi pelanggan.
+    - Hindari jawaban yang terlalu teknis di awal.
+    - Gunakan Bahasa Indonesia yang jelas.
+    - Ajukan maksimal satu pertanyaan utama dalam setiap jawaban.
+    - Jangan mengulang daftar seluruh layanan perusahaan kecuali diminta.
+    - Jangan terlalu sering menggunakan kalimat "Bapak/Ibu".
+    - Gunakan paragraf singkat agar nyaman dibaca.
+
+    ATURAN RAG
+
+    - Gunakan konteks dokumen sebagai referensi internal.
+    - Jangan menyebutkan proses retrieval, vector search, chunk,
+    database, embedding, atau konteks internal kepada pengguna.
+    - Jangan mengatakan:
+    "dokumen tidak ditemukan",
+    "konteks tidak tersedia",
+    "saya tidak menemukan dokumen",
+    atau kalimat teknis serupa.
+    - Jika informasi tidak tersedia dalam dokumen, jawab secara umum
+    dan jelaskan bahwa detail tersebut perlu dikonfirmasi dengan
+    tim PowerNet.
+    - Jangan mengarang pengalaman perusahaan, portofolio, harga,
+    jaminan, atau kemampuan yang tidak tersedia.
+    - Harga yang disampaikan hanya boleh berupa estimasi awal apabila
+    memang tersedia di konteks.
+    - Jangan meminta email atau nomor WhatsApp. Proses tersebut
+    ditangani oleh sistem handoff secara terpisah.
+
+    PENGGALIAN KEBUTUHAN
+
+    Informasi yang dapat digali secara bertahap:
+    - tujuan bisnis;
+    - jenis website atau aplikasi;
+    - target pengguna;
+    - fitur utama;
+    - alur pemesanan atau transaksi;
+    - kebutuhan panel admin;
+    - integrasi pembayaran;
+    - integrasi sistem lain;
+    - jumlah pengguna;
+    - target waktu;
+    - anggaran;
+    - kebutuhan hosting dan keamanan.
+
+    Jangan menanyakan semua informasi sekaligus.
+
+    PEMBUATAN RANCANGAN
+
+    Jika pengguna secara eksplisit meminta rancangan dan informasi
+    masih belum cukup:
+
+    - Berikan gambaran awal secara singkat.
+    - Tandai sebagai rancangan awal.
+    - Jangan memberikan detail berlebihan.
+    - Akhiri dengan satu pertanyaan untuk menyesuaikan rancangan.
+
+    Jika informasi sudah cukup, susun rancangan dengan format:
+
+    1. Pemahaman kebutuhan
+    2. Solusi yang direkomendasikan
+    3. Fitur utama
+    4. Alur pengguna
+    5. Rancangan teknis
+    6. Teknologi yang disarankan
+    7. Tahapan pengembangan
+    8. Informasi yang masih perlu dikonfirmasi
+
+    Rancangan harus tetap relevan dengan kebutuhan pengguna,
+    bukan template generik.
+    """.strip()
+
+def get_embedding(
+    text: str,
+) -> list[float]:
     cleaned_text = text.strip()
 
     if not cleaned_text:
         raise ValueError(
-            "Teks untuk embedding tidak boleh kosong"
+            "Teks embedding tidak boleh kosong"
         )
 
     response = client.embeddings.create(
@@ -107,29 +177,21 @@ def get_embedding(text: str) -> list[float]:
     return response.data[0].embedding
 
 
-def search_documents(
-    question: str,
-    limit: int = 8,
+def retrieve_documents(
+    query: str,
+    limit: int = 5,
 ) -> list[dict]:
-    cleaned_question = question.strip()
-
-    if not cleaned_question:
-        return []
-
     query_embedding = get_embedding(
-        cleaned_question
+        query
     )
 
     pipeline = [
         {
             "$vectorSearch": {
-                "index": VECTOR_INDEX_NAME,
+                "index": MONGODB_VECTOR_INDEX,
                 "path": "embedding",
                 "queryVector": query_embedding,
-                "numCandidates": max(
-                    200,
-                    limit * 25,
-                ),
+                "numCandidates": 100,
                 "limit": limit,
             }
         },
@@ -138,37 +200,105 @@ def search_documents(
                 "_id": 0,
                 "text": 1,
                 "source": 1,
+                "page_number": 1,
                 "chunk_index": 1,
                 "score": {
-                    "$meta": "vectorSearchScore",
+                    "$meta": "vectorSearchScore"
                 },
             }
-        }
+        },
     ]
 
     return list(
-        collection.aggregate(pipeline)
-    )
-
-
-def format_history(
-    history: list[dict[str, str]],
-    limit: int = 12,
-) -> str:
-    recent_history = history[-limit:]
-
-    return "\n".join(
-        (
-            f'{item.get("role", "unknown")}: '
-            f'{item.get("content", "")}'
+        collection.aggregate(
+            pipeline
         )
-        for item in recent_history
     )
+
+
+def format_context(
+    documents: list[dict],
+) -> str:
+    if not documents:
+        return ""
+
+    context_parts: list[str] = []
+
+    for index, document in enumerate(
+        documents,
+        start=1,
+    ):
+        text = document.get(
+            "text",
+            "",
+        ).strip()
+
+        if not text:
+            continue
+
+        page_number = document.get(
+            "page_number",
+            "-",
+        )
+
+        chunk_index = document.get(
+            "chunk_index",
+            "-",
+        )
+
+        score = document.get("score")
+
+        metadata = (
+            f"Halaman: {page_number}; "
+            f"Chunk: {chunk_index}"
+        )
+
+        if isinstance(score, (int, float)):
+            metadata += (
+                f"; Similarity: {score:.4f}"
+            )
+
+        context_parts.append(
+            f"[Referensi internal {index}]\n"
+            f"{metadata}\n"
+            f"{text}"
+        )
+
+    return "\n\n".join(context_parts)
+
+
+def build_history(
+    conversation_history: list[dict[str, str]],
+) -> list[ChatCompletionMessageParam]:
+    history: list[ChatCompletionMessageParam] = []
+
+    for message in conversation_history[-12:]:
+        role = message.get("role")
+        content = message.get("content", "").strip()
+
+        if not content:
+            continue
+
+        if role == "user":
+            history.append({
+                "role": "user",
+                "content": content,
+            })
+
+        elif role == "assistant":
+            history.append({
+                "role": "assistant",
+                "content": content,
+            })
+
+    return history
 
 
 def ask_ai(
     question: str,
-    history: list[dict[str, str]] | None = None,
+    conversation_history: list[
+        dict[str, str]
+    ] | None = None,
 ) -> str:
     cleaned_question = question.strip()
 
@@ -177,65 +307,63 @@ def ask_ai(
             "Pertanyaan tidak boleh kosong"
         )
 
-    documents = search_documents(
-        cleaned_question
+    documents = retrieve_documents(
+        query=cleaned_question,
+        limit=5,
     )
 
-    context = "\n\n".join(
-        document["text"]
-        for document in documents
-        if isinstance(
-            document.get("text"),
-            str,
+    context = format_context(documents)
+
+    messages: list[
+        ChatCompletionMessageParam
+    ] = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        }
+    ]
+
+    if conversation_history:
+        messages.extend(
+            build_history(
+                conversation_history
+            )
         )
-    )
 
-    if not context.strip():
-        return (
-            "Mohon maaf, saat ini saya belum menemukan "
-            "informasi tersebut pada data yang tersedia. "
-            "Apakah ada informasi lain terkait layanan "
-            "PT PowerNET Indosolution yang dapat saya bantu?"
+    if context:
+        user_prompt = (
+            "Berikut adalah referensi internal perusahaan. "
+            "Gunakan hanya jika relevan dengan percakapan. "
+            "Jangan menyebutkan referensi internal ini kepada "
+            "pengguna.\n\n"
+            f"{context}\n\n"
+            "Pesan pengguna:\n"
+            f"{cleaned_question}"
+        )
+    else:
+        user_prompt = (
+            "Jawab pesan pengguna secara konsultatif. "
+            "Bangun komunikasi terlebih dahulu dan gali "
+            "kebutuhannya secara bertahap.\n\n"
+            "Pesan pengguna:\n"
+            f"{cleaned_question}"
         )
 
-    history_text = format_history(
-        history or []
-    )
+    messages.append({
+        "role": "user",
+        "content": user_prompt,
+    })
 
     response = client.chat.completions.create(
         model=CHAT_MODEL,
-        temperature=0,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Informasi perusahaan:\n{context}\n\n"
-                    f"Riwayat percakapan:\n"
-                    f"{history_text or 'Belum ada percakapan sebelumnya.'}\n\n"
-                    f"Pertanyaan pengguna:\n{cleaned_question}\n\n"
-                    "Jawab menggunakan Markdown yang rapi sesuai aturan. "
-                    "Jangan jadikan semua informasi sebagai satu paragraf panjang."
-                ),
-            },
-        ],
+        messages=messages,
     )
 
-    content = response.choices[0].message.content
+    answer = response.choices[0].message.content
 
-    if content is None:
+    if answer is None or not answer.strip():
         raise RuntimeError(
             "Model tidak menghasilkan jawaban"
         )
 
-    answer = content.strip()
-
-    if not answer:
-        raise RuntimeError(
-            "Model menghasilkan jawaban kosong"
-        )
-
-    return answer
+    return answer.strip()
